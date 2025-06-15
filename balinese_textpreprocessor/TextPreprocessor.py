@@ -182,3 +182,44 @@ class TextPreprocessor:
         lemmatized_tokens = [Lemmatization(BALINESE_VOCABS).lemmatization(
             token.strip()) for token in text.split(' ')]
         return ' '.join(lemmatized_tokens)
+
+    def remove_parentheses(self, text):
+        return re.sub(r'\([^)]*\)$', '', text)
+
+    def remove_substring(self, text, substring):
+        return text.replace(substring, '')
+
+    def remove_urls_and_link(self, text):
+        """
+        Function to remove URLs and "LINK : " from a text
+        """
+        url_pattern = re.compile(r'https?://\S+|www\.\S+')
+        text_without_urls = url_pattern.sub(r'', text)
+        text_without_urls = text_without_urls.replace(
+            'LINK : ', '').replace('LINK:', '').replace('Link :', '')
+        return text_without_urls
+
+    def remove_non_ascii_punctuation(self, text):
+        """
+        Removes non-ASCII punctuation and symbols from a given text string,
+        handling None values and empty strings.
+
+        Args:
+            text: The input text string.  Can be None or an empty string.
+
+        Returns:
+            The text string with non-ASCII punctuation removed, or an empty string
+            if the input was None or an empty string.
+        """
+        if text is None:
+            return ""  # Or any other appropriate default value
+        text = str(text)  # Convert to string in case the value is not a string
+        if not text:
+            return ""
+        # Remove non-ascii characters
+        text = text.encode("ascii", "ignore").decode()
+        # Remove non-ascii punctuation and symbols
+        text = re.sub(r'[^\x00-\x7F]+', '', text)
+        # Remove punctuation
+        text = TextPreprocessor.remove_punctuation(text)
+        return text
