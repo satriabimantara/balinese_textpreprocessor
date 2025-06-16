@@ -428,3 +428,21 @@ class TextPreprocessor:
         lemmatized_tokens = [Lemmatization(BALINESE_VOCABS).lemmatization(
             token.strip()) for token in text.split(' ')]
         return ' '.join(lemmatized_tokens)
+
+    def replace_substrings(self, text, substrings=None):
+        """
+        Function to all the substrings in text with empty ('')
+        input:
+        - text: Str
+        - substrings: list
+
+        return:
+        - text without the substrings
+        """
+        if substrings is None:
+            return text
+
+        for substring in substrings:
+            text = text.replace(substring, '')
+
+        return text

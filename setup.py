@@ -15,7 +15,7 @@ def read_readme():
 
 setup(
     name='balinese_textpreprocessor',  # The name users will use to pip install
-    version='2.1.0',  # current version v2.1.0
+    version='2.1.1',  # current version v2.1.1
     # Automatically finds 'balipkg' and any sub-packages
     packages=find_packages(),
 
