@@ -12,3 +12,9 @@ print(obj.balinese_word_tokenize(sentence))
 # 1. Test word tokenization function
 print('Test function 1: balinese_sentences_segmentation')
 print(obj.balinese_sentences_segmentation(text))
+
+
+# 1. Test convert special characters
+print('Test Function: convert_ascii_sentence()')
+text = "I mémé ajake ì lutung luas ka cårik!"
+print(obj.convert_ascii_sentence(text))

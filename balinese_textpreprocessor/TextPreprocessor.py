@@ -4,6 +4,7 @@ from .utils import load_balinese_lemmatization_file, load_balinese_normalization
 from nltk.tokenize import word_tokenize
 import pandas as pd
 import string
+import unicodedata
 
 
 class TextPreprocessor:
@@ -260,25 +261,38 @@ class TextPreprocessor:
 
         return final_sentences
 
-    # remove special e and å characters in balinese text
-    def convert_special_characters(self, sentences):
-        list_characters = list(sentences)
-        special_e_characters = ['é', 'é', 'è',
-                                'é', 'é', 'é', 'é', 'é', 'ê', 'ë', 'é']
-        special_i_characters = ['ì', 'í']
-        special_u_characters = ['û']
-        special_a_characters = ['å', 'å']
-        for idx, character in enumerate(list_characters):
-            if character in special_e_characters:
-                list_characters[idx] = 'e'
-            if character in special_a_characters:
-                list_characters[idx] = 'a'
-            if character in special_i_characters:
-                list_characters[idx] = 'i'
-            if character in special_u_characters:
-                list_characters[idx] = 'u'
+    
+    def convert_ascii_sentence(self, sentence):
+        """
+        Converts a sentence to contain only ASCII characters and ASCII punctuation.
+        Non-ASCII characters (including accented letters) and non-ASCII punctuation
+        are removed.
 
-        return "".join(list_characters)
+        Args:
+            sentence: A string of sentence.
+
+        Returns:
+            A string with all non-ASCII characters and
+            non-ASCII punctuation removed.
+        """
+        # Normalize the string to NFKD form (Compatibility Decomposition).
+        # This separates base characters from their diacritical marks (accents, etc.).
+        # For example, 'é' becomes 'e' followed by a combining acute accent.
+        # This step is crucial for properly converting accented characters before encoding.
+        normalized_sentence = unicodedata.normalize('NFKD', sentence)
+        
+        # Encode the normalized string to 'ascii' and then decode it back.
+        # The 'ignore' error handler ensures that any character that cannot
+        # be represented in ASCII (i.e., all non-ASCII characters, including
+        # diacritics and non-ASCII punctuation) is simply dropped.
+        ascii_only_sentence = normalized_sentence.encode('ascii', 'ignore').decode('ascii')
+        
+        # Strip any leading or trailing whitespace that might result from
+        # the removal of characters, ensuring clean sentence boundaries.
+        cleaned_sentence = ascii_only_sentence.strip()
+
+        return cleaned_sentence
+
 
     def remove_special_punctuation(self, text, special_punctuations={
         '–': '-',
