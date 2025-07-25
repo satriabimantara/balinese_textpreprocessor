@@ -1,9 +1,6 @@
-from .balinese_lemmatization.Lemmatization import Lemmatization
+from balinese_nlp.textpreprocessor.lemmatization.LevenstheinDistance import Lemmatization
 import re
 from .utils import load_balinese_lemmatization_file, load_balinese_normalization_dict, load_balinese_stop_words
-from nltk.tokenize import word_tokenize
-import pandas as pd
-import string
 import unicodedata
 
 
@@ -26,6 +23,21 @@ class TextPreprocessor:
     def __init__(self):
         # Call the initialization method to load data if not already loaded
         TextPreprocessor._initialize_data()
+        # Definisikan karakter yang dianggap sebagai bagian dari "kata"
+        self.word_chars_set = r"[\w'-]"
+        # Definisikan karakter tanda baca umum
+        self.punc_chars_set = r"[.,!?;:()\[\]{}'\"“”‘’/]"
+
+        # Kompilasi pola regex untuk tanda baca agar lebih efisien
+        self.punc_pattern = re.compile(self.punc_chars_set, re.UNICODE)
+
+        # Pola regex untuk menemukan tanda baca di akhir string (satu atau lebih)
+        self.trailing_punc_pattern = re.compile(
+            r'(' + self.punc_chars_set + r')+$', re.UNICODE)
+
+        # Pola regex untuk menemukan tanda baca di awal string (satu atau lebih)
+        self.leading_punc_pattern = re.compile(
+            r'^(' + self.punc_chars_set + r'+)', re.UNICODE)
 
     def remove_emoji_pattern(self, input_text):
         """
@@ -113,6 +125,14 @@ class TextPreprocessor:
         # Jika ada pola 'kata- spasi kata', gabungkan menjadi satu kata
         sentence = re.sub(r'(\w+)-\s+(\w+)', r'\1\2', sentence)
 
+        # Definisikan karakter yang dianggap sebagai bagian dari "kata"
+        # (huruf, angka, underscore, hipen, apostrof)
+        word_chars_set = r"[\w'-]"
+
+        # Definisikan karakter tanda baca yang bisa muncul berdiri sendiri atau melekat pada kata
+        # Ini mencakup semua tanda baca umum yang Anda sebutkan
+        punc_chars_set = r"[.,!?;:()\[\]{}'\"“”‘’/]"
+
         # 2. Pola Regular Expression untuk tokenisasi kata
         # Ini adalah pola yang lebih komprehensif:
         # - \w+ : Mencocokkan satu atau lebih karakter "kata" (huruf, angka, underscore). Ini menangkap kata-kata biasa dan angka.
@@ -151,42 +171,61 @@ class TextPreprocessor:
         # - Kata-kata biasa
         # - Semua tanda baca lainnya
         token_pattern = re.compile(r"""
-            (?:[A-Z]\.)+[A-Z]?     # 1. Singkatan huruf kapital dengan titik (e.g., N.I.C.A., Mr.)
-            | \b\w+(?:['‘“]\w+)?\b # 2. Kata-kata dengan apostrof/tanda kutip di tengah/akhir (e.g., Indonésiané, "kali")
-            | \d+(?:[.,]\d+)?      # 3. Angka (e.g., 1948, 1.000, 3.14)
-            | [^\s\w]              # 4. Tanda baca (apapun yang bukan spasi atau karakter kata)
-        """, re.VERBOSE | re.UNICODE)  # re.VERBOSE untuk komentar, re.UNICODE untuk \w dengan karakter non-ASCII
+            # 1. Singkatan huruf kapital dengan titik (e.g., N.I.C.A., Mr.)
+            (?:[A-Z]\.)+[A-Z]?
 
-        tokens = token_pattern.findall(sentence)
+            # 2. Angka (termasuk desimal/ribuan)
+            | \d+(?:[.,]\d+)?
 
-        # Post-processing:
-        # Hapus token kosong atau hanya spasi (jika ada karena kesalahan pola)
-        # Beberapa kasus tanda baca mungkin masih menempel pada kata jika pola di atas tidak sempurna.
-        # Mari kita buat regex yang secara eksplisit memisahkan tanda baca di awal/akhir kata.
+            # 3. KATA yang mungkin memiliki HIPEN/APOSTROF internal DAN mungkin memiliki TANDA BACA di AKHIR
+            # Ini adalah perubahan kunci untuk "uyeng-uyengan," atau "pianakne,"
+            # Mencocokkan serangkaian karakter kata, diikuti secara opsional oleh nol atau lebih
+            # karakter tanda baca dari punc_chars_set. Batas kata (\b) di akhir memastikan
+            # bahwa itu tidak melintasi spasi atau batas kata lainnya.
+            | \b""" + word_chars_set + r"""+(?:""" + punc_chars_set + r""")*\b
+
+            # 4. Urutan tanda baca yang berdiri sendiri (misalnya "!!", ".?", "...", atau tanda kutip tunggal)
+            # Ini akan mencocokkan satu atau lebih karakter dari punc_chars_set.
+            # Penting: Pola ini harus ditempatkan SETELAH pola "kata dengan tanda baca di akhir"
+            # agar pola kata mendapatkan prioritas lebih tinggi.
+            | """ + punc_chars_set + r"""+
+
+            # 5. Pola fallback untuk karakter non-spasi, non-kata, non-tanda-baca lainnya
+            # (Misalnya simbol matematika, simbol mata uang, jika tidak termasuk dalam angka)
+            | [^\s\w]
+
+        """, re.VERBOSE | re.UNICODE)  # re.VERBOSE memungkinkan komentar dalam regex, re.UNICODE mendukung karakter Unicode
+
+        raw_tokens = token_pattern.findall(sentence)
+
         final_tokens = []
-        for token in tokens:
-            # Pisahkan tanda baca di awal/akhir token
-            # Contoh: "kata." -> "kata", "."
-            # Contoh: "(kata)" -> "(", "kata", ")"
-            # Contoh: "kata-kata" -> "kata-kata" (biarkan hipen di tengah kata)
 
-            # Pisahkan tanda baca di awal
-            match_start = re.match(r'^([^\w\s]+)(.*)', token)
+        # Pola Regex untuk memisahkan tanda baca di AWAL token
+        # Ini hanya akan berlaku untuk token yang dimulai dengan tanda baca diikuti oleh sesuatu yang lain
+        # Contoh: "(kata" seharusnya menjadi "(" dan "kata"
+        # Ini TIDAK akan memengaruhi "kata,", "kata.", atau "!!", karena pola utama sudah menanganinya.
+        leading_punctuation_pattern = re.compile(
+            r'^(' + punc_chars_set + r'+)(.*)', re.UNICODE)
+
+        for token in raw_tokens:
+            # Lewati jika token kosong setelah pemrosesan awal
+            if not token.strip():
+                continue
+
+            # Periksa dan pisahkan tanda baca di AWAL token
+            match_start = leading_punctuation_pattern.match(token)
             if match_start:
+                # Tambahkan tanda baca di awal
                 final_tokens.append(match_start.group(1))
-                token = match_start.group(2)
-
-            # Pisahkan tanda baca di akhir
-            match_end = re.match(r'(.*)([^\w\s]+)$', token)
-            if match_end:
-                token = match_end.group(1)
-                if token:  # Pastikan bukan string kosong setelah pemisahan
-                    final_tokens.append(token)
-                final_tokens.append(match_end.group(2))
-            elif token:  # Jika tidak ada tanda baca di awal/akhir, tambahkan tokennya jika tidak kosong
+                remaining_token = match_start.group(2)
+                if remaining_token:  # Tambahkan sisa token jika tidak kosong
+                    final_tokens.append(remaining_token)
+            else:
+                # Jika tidak ada tanda baca di awal, atau jika itu adalah kata-dengan-tanda-baca-di-akhir,
+                # atau tanda baca murni, tambahkan token seperti adanya.
                 final_tokens.append(token)
 
-        # Filter lagi untuk memastikan tidak ada string kosong atau hanya spasi
+        # Saring string kosong yang mungkin dihasilkan
         return [t for t in final_tokens if t and not t.isspace()]
 
     # function to segment balinese paragraphs into sentences
@@ -261,7 +300,6 @@ class TextPreprocessor:
 
         return final_sentences
 
-    
     def convert_ascii_sentence(self, sentence):
         """
         Converts a sentence to contain only ASCII characters and ASCII punctuation.
@@ -280,19 +318,19 @@ class TextPreprocessor:
         # For example, 'é' becomes 'e' followed by a combining acute accent.
         # This step is crucial for properly converting accented characters before encoding.
         normalized_sentence = unicodedata.normalize('NFKD', sentence)
-        
+
         # Encode the normalized string to 'ascii' and then decode it back.
         # The 'ignore' error handler ensures that any character that cannot
         # be represented in ASCII (i.e., all non-ASCII characters, including
         # diacritics and non-ASCII punctuation) is simply dropped.
-        ascii_only_sentence = normalized_sentence.encode('ascii', 'ignore').decode('ascii')
-        
+        ascii_only_sentence = normalized_sentence.encode(
+            'ascii', 'ignore').decode('ascii')
+
         # Strip any leading or trailing whitespace that might result from
         # the removal of characters, ensuring clean sentence boundaries.
         cleaned_sentence = ascii_only_sentence.strip()
 
         return cleaned_sentence
-
 
     def remove_special_punctuation(self, text, special_punctuations={
         '–': '-',
@@ -374,7 +412,7 @@ class TextPreprocessor:
     def remove_stop_words(self, text):
         BALINESE_STOP_WORDS = TextPreprocessor._BALINESE_STOP_WORDS
         # remove stopwords process
-        tokenize_text = word_tokenize(text)
+        tokenize_text = self.balinese_word_tokenize(text)
         for idx, token in enumerate(tokenize_text):
             if token.lower() in BALINESE_STOP_WORDS:
                 del tokenize_text[tokenize_text.index(token)]
@@ -429,7 +467,7 @@ class TextPreprocessor:
         BALINESE_UNNORMALIZE_WORDS = TextPreprocessor._BALINESE_NORMALIZE_DICT['unnormalized']
 
         # normalize words process
-        tokenize_text = word_tokenize(text)
+        tokenize_text = self.balinese_word_tokenize(text)
         for idx, token in enumerate(tokenize_text):
             if token.lower() in BALINESE_UNNORMALIZE_WORDS:
                 tokenize_text[tokenize_text.index(
@@ -460,3 +498,108 @@ class TextPreprocessor:
             text = text.replace(substring, '')
 
         return text
+
+    def remove_punctuation_from_token(self, token):
+        """
+        Menghapus semua tanda baca dari sebuah token string.
+
+        Args:
+            token (str): Sebuah token (kata) yang mungkin mengandung tanda baca.
+
+        Returns:
+            str: Token tanpa tanda baca.
+        """
+        return self.punc_pattern.sub('', token)
+
+    def get_trailing_punctuation(self, token):
+        """
+        Mendapatkan tanda baca yang menempel di akhir sebuah token.
+
+        Args:
+            token (str): Sebuah token (kata) yang mungkin mengandung tanda baca di akhirnya.
+
+        Returns:
+            str: String yang berisi tanda baca di akhir token, atau string kosong jika tidak ada.
+        """
+        match = self.trailing_punc_pattern.search(token)
+        if match:
+            return match.group(0)
+        return ""
+
+    def split_token_and_trailing_punctuation(self, token_str):
+        """
+        Memisahkan sebuah token menjadi bagian kata dan tanda baca di akhir (jika ada).
+        Contoh: 'uyeng-uyengan,' akan menjadi ['uyeng-uyengan', ',']
+
+        Args:
+            token_str (str): Sebuah string token.
+
+        Returns:
+            list: Daftar yang berisi [bagian_kata, tanda_baca_akhir] jika ada tanda baca
+                  di akhir, atau [bagian_kata] jika tidak ada.
+        """
+        trailing_punc = self.get_trailing_punctuation(token_str)
+        if trailing_punc:
+            word_part = token_str[:-len(trailing_punc)]
+            if not word_part and trailing_punc:  # Handle cases like '!' or '?' as standalone
+                return [trailing_punc]
+            return [word_part, trailing_punc]
+        else:
+            return [token_str]
+
+    def split_token_by_punctuation(self, token_str):
+        """
+        Memisahkan sebuah token menjadi bagian tanda baca awal, kata, dan tanda baca akhir.
+
+        Args:
+            token_str (str): Sebuah string token.
+
+        Returns:
+            list: Daftar yang berisi bagian-bagian token yang sudah dipisahkan.
+                  Contoh: ['(', 'kata', ')'], ['kata', '?'], ['"', 'teks', '!'], ['!'], ['kata']
+        """
+        result = []
+        current_processing_str = token_str
+
+        # 1. Ekstrak tanda baca awal
+        match_leading = self.leading_punc_pattern.match(current_processing_str)
+        leading_punc = ""
+        if match_leading:
+            leading_punc = match_leading.group(0)
+            current_processing_str = current_processing_str[len(
+                leading_punc):]  # Sisa string
+
+        # 2. Ekstrak tanda baca akhir dari sisa string
+        match_trailing = self.trailing_punc_pattern.search(
+            current_processing_str)
+        trailing_punc = ""
+        word_part = ""
+        if match_trailing:
+            trailing_punc = match_trailing.group(0)
+            # Bagian kata di tengah
+            word_part = current_processing_str[:-len(trailing_punc)]
+        else:
+            # Jika tidak ada tanda baca akhir, seluruh sisa adalah kata
+            word_part = current_processing_str
+
+        # 3. Tambahkan bagian-bagian yang tidak kosong ke hasil
+        if leading_punc:
+            result.append(leading_punc)
+
+        # Pastikan bagian kata tidak kosong (misal untuk input '()')
+        if word_part:
+            result.append(word_part)
+
+        if trailing_punc:
+            result.append(trailing_punc)
+
+        # Jika hasilnya kosong (misalnya input adalah string kosong atau hanya spasi),
+        # atau jika token asli hanya terdiri dari tanda baca yang sudah ditangani,
+        # pastikan outputnya konsisten (misal '!' menjadi ['!'])
+        if not result and token_str:
+            # Ini akan menangani kasus di mana token_str murni tanda baca
+            # dan belum ditambahkan ke result (seharusnya sudah ditangani oleh leading_punc)
+            # Namun, ini sebagai fallback jika ada edge case yang terlewat
+            return [token_str] if token_str.strip() else []
+
+        return result
