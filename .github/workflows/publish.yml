@@ -21,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.8" # Use a specific Python version (e.g., '3.8', '3.9', '3.10', '3.11', '3.12')
+          python-version: "3.11" # Use a specific Python version (e.g., '3.8', '3.9', '3.10', '3.11', '3.12')
           # Or if you use `python_requires` in setup.py, you can use:
           # python-version: ${{ matrix.python-version }} # if you have a matrix strategy
 
